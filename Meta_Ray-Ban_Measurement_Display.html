@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="description" content="Measurement tool for Meta Ray-Ban Display glasses — ruler, path, angle tools with calibration">
+<meta name="mrbd-web-app-capable" content="yes">
+<meta name="viewport" content="width=600, height=600, initial-scale=1.0, user-scalable=no">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 600px;
+    height: 600px;
+    overflow: hidden;
+    background: #000;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: #fff;
+    user-select: none;
+    touch-action: none;
+    overscroll-behavior: none;
+  }
+
+  #app {
+    position: relative;
+    width: 600px;
+    height: 600px;
+    overflow: hidden;
+  }
+
+  /* Camera / background */
+  video#camera {
+    position: absolute;
+    top: 0; left: 0;
+    width: 600px; height: 600px;
+    object-fit: cover;
+    z-index: 0;
+  }
+
+  .no-camera {
+    position: absolute;
+    top: 0; left: 0;
+    width: 600px; height: 600px;
+    background: #000;
+    z-index: 0;
+  }
+
+  .no-camera-grid {
+    width: 600px; height: 600px;
+    background-image:
+      linear-gradient(rgba(0,212,255,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  /* Canvas layers */
+  canvas#overlay { position: absolute; top: 0; left: 0; z-index: 2; pointer-events: none; }
+  canvas#drawLayer { position: absolute; top: 0; left: 0; z-index: 3; pointer-events: none; }
+
+  /* Cursor */
+  .cursor-ring {
+    position: absolute;
+    width: 16px; height: 16px;
+    border: 2px solid #00d4ff;
+    border-radius: 50%;
+    transform: translate(-8px, -8px);
+    pointer-events: none;
+    z-index: 8;
+    box-shadow: 0 0 12px rgba(0,212,255,0.5);
+    display: none;
+  }
+
+  .cursor-ring.show { display: block; }
+
+  .cursor-dot {
+    position: absolute;
+    width: 4px; height: 4px;
+    background: #00d4ff;
+    border-radius: 50%;
+    transform: translate(-2px, -2px);
+    pointer-events: none;
+    z-index: 9;
+    display: none;
+  }
+
+  .cursor-dot.show { display: block; }
+
+  /* Crosshairs */
+  .ch { position: absolute; pointer-events: none; z-index: 7; display: none; }
+  .ch.show { display: block; }
+  .ch-h { width: 600px; height: 1px; left: 0; background: rgba(0,212,255,0.2); }
+  .ch-v { height: 600px; width: 1px; top: 0; background: rgba(0,212,255,0.2); }
+
+  /* ========== HEADER ========== */
+  .header {
+    position: absolute;
+    top: 0; left: 0;
+    width: 600px; height: 34px;
+    background: linear-gradient(180deg, rgba(0,0,0,0.75) 0%, transparent 100%);
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 14px;
+  }
+
+  .logo {
+    font-size: 11px; font-weight: 700;
+    letter-spacing: 2px; color: rgba(255,255,255,0.85);
+    text-transform: uppercase;
+  }
+  .logo span { color: #e23636; }
+
+  .status-area {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 10px; color: rgba(255,255,255,0.5);
+  }
+
+  .s-dot {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: #00d4ff;
+    box-shadow: 0 0 6px #00d4ff;
+  }
+
+  /* ========== READOUT ========== */
+  .readout {
+    position: absolute;
+    top: 38px; left: 0; width: 600px;
+    text-align: center;
+    z-index: 10;
+    pointer-events: none;
+  }
+
+  .r-val {
+    font-size: 30px; font-weight: 700;
+    font-family: 'SF Mono', Consolas, monospace;
+    color: #fff;
+    text-shadow: 0 0 18px rgba(0,212,255,0.4);
+  }
+  .r-unit { font-size: 14px; color: rgba(255,255,255,0.45); margin-left: 3px; font-weight: 400; }
+  .r-label { font-size: 9px; color: rgba(255,255,255,0.35); text-transform: uppercase; letter-spacing: 1.5px; margin-top: 2px; }
+
+  /* ========== MEASUREMENT LIST ========== */
+  .m-list {
+    position: absolute;
+    top: 38px; right: 10px;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    overflow: hidden;
+  }
+
+  .m-item {
+    background: rgba(0,0,0,0.5);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 6px;
+    padding: 3px 8px;
+    font-size: 10px;
+    font-family: 'SF Mono', Consolas, monospace;
+    display: flex; align-items: center; gap: 5px;
+  }
+
+  .m-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ========== MODE TAG ========== */
+  .mode-tag {
+    position: absolute;
+    top: 38px; left: 10px;
+    z-index: 10;
+    font-size: 9px;
+    color: rgba(255,255,255,0.3);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  /* ========== HUD ========== */
+  .hud {
+    position: absolute;
+    bottom: 0; left: 0;
+    width: 600px;
+    background: linear-gradient(0deg, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.5) 75%, transparent 100%);
+    z-index: 10;
+    padding: 16px 12px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  /* ========== FOCUSABLE META STANDARD ========== */
+  [data-focusable] {
+    transition: all 150ms ease;
+    border: 2px solid transparent;
+    outline: none;
+  }
+
+  [data-focusable]:focus,
+  [data-focusable].focused {
+    outline: none;
+    border-color: #00d4ff;
+    box-shadow: 0 0 20px rgba(0,212,255,0.4);
+  }
+
+  /* ========== TOOLBAR ========== */
+  .toolbar {
+    display: flex;
+    justify-content: center;
+    gap: 4px;
+  }
+
+  .t-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 12px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.55);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    min-height: 44px;
+    cursor: pointer;
+  }
+
+  .t-btn i { font-size: 15px; }
+  .t-btn.active { background: rgba(0,212,255,0.2); color: #00d4ff; }
+  .t-btn.cal-done { color: #4ade80; }
+
+  /* ========== CONTROLS ROW ========== */
+  .controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .u-group {
+    display: flex;
+    gap: 2px;
+  }
+
+  .u-btn {
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.35);
+    background: rgba(255,255,255,0.05);
+    min-height: 28px;
+    cursor: pointer;
+  }
+
+  .u-btn.active { background: rgba(0,212,255,0.25); color: #00d4ff; }
+
+  .a-btns { display: flex; gap: 4px; }
+
+  .a-btn {
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.5);
+    background: rgba(255,255,255,0.06);
+    text-transform: uppercase;
+    min-height: 28px;
+    cursor: pointer;
+  }
+
+  .a-btn.danger { color: #ff5050; }
+
+  /* ========== NAV HINT ========== */
+  .nav-hint {
+    position: absolute;
+    bottom: 120px; left: 0; width: 600px;
+    text-align: center;
+    z-index: 10;
+    font-size: 8px;
+    color: rgba(255,255,255,0.2);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    pointer-events: none;
+  }
+
+  /* ========== SCREENS (calibration, etc) ========== */
+  .screen-overlay {
+    display: none;
+    position: absolute;
+    top: 0; left: 0;
+    width: 600px; height: 600px;
+    background: rgba(0,0,0,0.85);
+    z-index: 20;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .screen-overlay.show { display: flex; }
+
+  .cal-card {
+    width: 300px;
+    background: rgba(10,12,18,0.97);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 14px;
+    padding: 18px;
+  }
+
+  .cal-card h3 { font-size: 14px; font-weight: 600; margin-bottom: 3px; color: #fff; }
+  .cal-card p { font-size: 10px; color: rgba(255,255,255,0.4); margin-bottom: 12px; line-height: 1.4; }
+
+  .cal-opt {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.04);
+    margin-bottom: 5px;
+    min-height: 44px;
+    cursor: pointer;
+  }
+
+  .cal-opt i { font-size: 16px; color: #00d4ff; width: 20px; text-align: center; }
+  .cal-opt .cl { font-size: 12px; font-weight: 500; }
+  .cal-opt .cs { font-size: 9px; color: rgba(255,255,255,0.3); }
+  .cal-opt.selected { background: rgba(0,212,255,0.12); border-color: rgba(0,212,255,0.4); }
+
+  .cal-apply {
+    width: 100%;
+    padding: 10px;
+    margin-top: 10px;
+    border-radius: 8px;
+    background: #00d4ff;
+    color: #000;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: center;
+    min-height: 44px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <video id="camera" autoplay playsinline muted></video>
+  <div class="no-camera" id="noCam"><div class="no-camera-grid"></div></div>
+
+  <canvas id="overlay" width="600" height="600"></canvas>
+  <canvas id="drawLayer" width="600" height="600"></canvas>
+
+  <!-- Cursor -->
+  <div class="ch ch-h" id="chH"></div>
+  <div class="ch ch-v" id="chV"></div>
+  <div class="cursor-ring" id="cRing"></div>
+  <div class="cursor-dot" id="cDot"></div>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="logo"><span>META</span> | RAY-BAN</div>
+    <div class="status-area">
+      <span id="camLabel">READY</span>
+      <div class="s-dot" id="sDot"></div>
+    </div>
+  </div>
+
+  <!-- Readout -->
+  <div class="readout">
+    <div class="r-val" id="rVal">—</div>
+    <div class="r-label" id="rLabel">SWIPE TO NAVIGATE · PINCH TO SELECT</div>
+  </div>
+
+  <!-- Side displays -->
+  <div class="mode-tag" id="modeTag"></div>
+  <div class="m-list" id="mList"></div>
+
+  <!-- Nav hint -->
+  <div class="nav-hint" id="navHint">↑↓ NAVIGATE · ENTER/PINCH SELECT · ←→ MOVE</div>
+
+  <!-- HUD -->
+  <div class="hud">
+    <div class="toolbar" id="toolbar">
+      <div class="t-btn active" tabindex="0" data-focusable data-tool="ruler" onclick="activateTool('ruler')"><i class="fa-solid fa-ruler"></i>Ruler</div>
+      <div class="t-btn" tabindex="0" data-focusable data-tool="path" onclick="activateTool('path')"><i class="fa-solid fa-draw-polygon"></i>Path</div>
+      <div class="t-btn" tabindex="0" data-focusable data-tool="angle" onclick="activateTool('angle')"><i class="fa-solid fa-less-than"></i>Angle</div>
+      <div class="t-btn" tabindex="0" data-focusable data-tool="grid" onclick="toggleGrid()"><i class="fa-solid fa-border-all"></i>Grid</div>
+      <div class="t-btn" tabindex="0" data-focusable data-tool="cal" onclick="openCal()"><i class="fa-solid fa-bullseye"></i>Cal</div>
+    </div>
+    <div class="controls">
+      <div class="u-group">
+        <div class="u-btn active" tabindex="0" data-focusable data-unit="mm" onclick="setUnit('mm')">MM</div>
+        <div class="u-btn" tabindex="0" data-focusable data-unit="cm" onclick="setUnit('cm')">CM</div>
+        <div class="u-btn" tabindex="0" data-focusable data-unit="in" onclick="setUnit('in')">IN</div>
+        <div class="u-btn" tabindex="0" data-focusable data-unit="px" onclick="setUnit('px')">PX</div>
+      </div>
+      <div class="a-btns">
+        <div class="a-btn" tabindex="0" data-focusable onclick="undoLast()"><i class="fa-solid fa-rotate-left"></i> Undo</div>
+        <div class="a-btn danger" tabindex="0" data-focusable onclick="clearAll()"><i class="fa-solid fa-trash"></i> Clear</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Calibration screen -->
+  <div class="screen-overlay" id="calScreen">
+    <div class="cal-card">
+      <h3><i class="fa-solid fa-bullseye" style="color:#00d4ff;margin-right:5px;"></i> Calibrate</h3>
+      <p>Select a reference, then place two points across it.</p>
+      <div class="cal-opt" tabindex="0" data-focusable data-calmm="85.6" onclick="selectCal(this,85.6)"><i class="fa-solid fa-credit-card"></i><div><div class="cl">Credit Card</div><div class="cs">85.6 mm wide</div></div></div>
+      <div class="cal-opt" tabindex="0" data-focusable data-calmm="24.26" onclick="selectCal(this,24.26)"><i class="fa-solid fa-coins"></i><div><div class="cl">US Quarter</div><div class="cs">24.26 mm diameter</div></div></div>
+      <div class="cal-opt" tabindex="0" data-focusable data-calmm="25.4" onclick="selectCal(this,25.4)"><i class="fa-solid fa-ruler"></i><div><div class="cl">1 Inch Reference</div><div class="cs">25.4 mm</div></div></div>
+      <div class="cal-apply" tabindex="0" data-focusable onclick="applyCal()">DRAW REFERENCE LINE</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ========== CONSTANTS ==========
+var W = 600, H = 600;
+var COLORS = ['#00d4ff','#ff6b6b','#4ade80','#fbbf24','#a78bfa','#fb7185','#34d399','#60a5fa'];
+var CURSOR_STEP = 8;
+
+// ========== STATE ==========
+var tool = 'ruler', unit = 'mm', gridOn = false;
+var calibrating = false, calRefMM = null, pxPerMM = null;
+var cursorX = 300, cursorY = 260;
+var onCanvas = true;
+var points = [], measurements = [], colorIdx = 0;
+var calOpen = false, calSelMM = null;
+
+// ========== DOM ==========
+var overlayCtx = document.getElementById('overlay').getContext('2d');
+var drawCtx = document.getElementById('drawLayer').getContext('2d');
+var cRing = document.getElementById('cRing');
+var cDot = document.getElementById('cDot');
+var chH = document.getElementById('chH');
+var chV = document.getElementById('chV');
+
+// ========== CAMERA ==========
+(function() {
+  navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'environment', width: { ideal: 600 }, height: { ideal: 600 } }
+  }).then(function(s) {
+    document.getElementById('camera').srcObject = s;
+    document.getElementById('noCam').style.display = 'none';
+    document.getElementById('sDot').style.background = '#4ade80';
+    document.getElementById('sDot').style.boxShadow = '0 0 6px #4ade80';
+    document.getElementById('camLabel').textContent = 'LIVE';
+  }).catch(function() {
+    document.getElementById('sDot').style.background = '#fbbf24';
+    document.getElementById('sDot').style.boxShadow = '0 0 6px #fbbf24';
+    document.getElementById('camLabel').textContent = 'DEMO';
+  });
+})();
+
+// ========== META FOCUS MANAGEMENT ==========
+var focusableElements = [];
+var focusIndex = 0;
+
+function updateFocusables() {
+  focusableElements = Array.prototype.slice.call(
+    document.querySelectorAll('[data-focusable]:not([disabled])')
+  );
+}
+
+function moveFocusMeta(idx) {
+  focusableElements.forEach(function(el) { el.classList.remove('focused'); });
+  focusIndex = Math.max(0, Math.min(idx, focusableElements.length - 1));
+  if (focusableElements[focusIndex]) {
+    focusableElements[focusIndex].classList.add('focused');
+    focusableElements[focusIndex].focus();
+  }
+}
+
+document.addEventListener('focusin', function(e) {
+  var idx = focusableElements.indexOf(e.target);
+  if (idx !== -1) {
+    focusableElements.forEach(function(el) { el.classList.remove('focused'); });
+    focusIndex = idx;
+    e.target.classList.add('focused');
+  }
+});
+
+// ========== CURSOR DISPLAY ==========
+function showCursor() {
+  cRing.classList.add('show');
+  cDot.classList.add('show');
+  chH.classList.add('show');
+  chV.classList.add('show');
+  cRing.style.left = cursorX + 'px'; cRing.style.top = cursorY + 'px';
+  cDot.style.left = cursorX + 'px'; cDot.style.top = cursorY + 'px';
+  chH.style.top = cursorY + 'px';
+  chV.style.left = cursorX + 'px';
+}
+
+function hideCursor() {
+  cRing.classList.remove('show');
+  cDot.classList.remove('show');
+  chH.classList.remove('show');
+  chV.classList.remove('show');
+}
+
+// ========== DRAG SUPPORT (Neural Band pinch+drag) ==========
+var dragging = false;
+document.addEventListener('pointerdown', function(e) {
+  if (onCanvas && !calOpen) {
+    dragging = true;
+    cursorX = Math.max(0, Math.min(W, e.clientX));
+    cursorY = Math.max(0, Math.min(H, e.clientY));
+    showCursor();
+    redraw();
+  }
+});
+document.addEventListener('pointermove', function(e) {
+  if (dragging && onCanvas) {
+    cursorX = Math.max(0, Math.min(W, e.clientX));
+    cursorY = Math.max(34, Math.min(H - 120, e.clientY));
+    showCursor();
+    redraw();
+  }
+});
+document.addEventListener('pointerup', function() {
+  if (dragging) {
+    dragging = false;
+    if (onCanvas) placePoint(cursorX, cursorY);
+  }
+});
+
+// ========== KEYBOARD/D-PAD NAVIGATION ==========
+var lastEnterTime = 0;
+
+document.addEventListener('keydown', function(e) {
+  switch (e.key) {
+    case 'ArrowUp':
+      e.preventDefault();
+      if (onCanvas) {
+        var newY = cursorY - CURSOR_STEP;
+        if (newY < 36) {
+          onCanvas = false;
+          hideCursor();
+          updateFocusables();
+          moveFocusMeta(0);
+          document.getElementById('navHint').textContent = '↑↓ ←→ NAVIGATE · ENTER/PINCH SELECT';
+        } else {
+          cursorY = newY;
+          showCursor();
+          redraw();
+        }
+      } else {
+        moveFocusMeta(focusIndex - 1);
+      }
+      break;
+
+    case 'ArrowDown':
+      e.preventDefault();
+      if (onCanvas) {
+        cursorY = Math.min(H - 125, cursorY + CURSOR_STEP);
+        showCursor();
+        redraw();
+      } else {
+        if (focusIndex >= focusableElements.length - 1) {
+          onCanvas = true;
+          focusableElements.forEach(function(el) { el.classList.remove('focused'); });
+          if (document.activeElement) document.activeElement.blur();
+          showCursor();
+          document.getElementById('navHint').textContent = '↑↓ ←→ MOVE CURSOR · ENTER/PINCH PLACE · ↑ TOOLBAR';
+        } else {
+          moveFocusMeta(focusIndex + 1);
+        }
+      }
+      break;
+
+    case 'ArrowLeft':
+      e.preventDefault();
+      if (onCanvas) {
+        cursorX = Math.max(0, cursorX - CURSOR_STEP);
+        showCursor();
+        redraw();
+      } else {
+        moveFocusMeta(focusIndex - 1);
+      }
+      break;
+
+    case 'ArrowRight':
+      e.preventDefault();
+      if (onCanvas) {
+        cursorX = Math.min(W, cursorX + CURSOR_STEP);
+        showCursor();
+        redraw();
+      } else {
+        moveFocusMeta(focusIndex + 1);
+      }
+      break;
+
+    case 'Enter':
+      e.preventDefault();
+      if (onCanvas && !calOpen) {
+        var now = Date.now();
+        if (tool === 'path' && points.length >= 2 && (now - lastEnterTime) < 500) {
+          finishMeas();
+          lastEnterTime = 0;
+        } else {
+          placePoint(cursorX, cursorY);
+          lastEnterTime = now;
+        }
+      } else {
+        if (document.activeElement && document.activeElement.matches('[data-focusable]')) {
+          document.activeElement.click();
+        }
+      }
+      break;
+
+    case 'Escape':
+    case 'Backspace':
+      e.preventDefault();
+      if (calOpen) {
+        closeCal();
+      } else if (!onCanvas) {
+        onCanvas = true;
+        focusableElements.forEach(function(el) { el.classList.remove('focused'); });
+        if (document.activeElement) document.activeElement.blur();
+        showCursor();
+      }
+      break;
+  }
+});
+
+// ========== TOOLS ==========
+function activateTool(t) {
+  if (t === 'grid' || t === 'cal') return;
+  tool = t;
+  points = [];
+  document.querySelectorAll('.t-btn').forEach(function(b) {
+    if (b.dataset.tool !== 'grid' && b.dataset.tool !== 'cal')
+      b.classList.toggle('active', b.dataset.tool === t);
+  });
+  var labels = { ruler: 'PLACE 2 POINTS TO MEASURE', path: 'PLACE POINTS · DOUBLE-ENTER TO FINISH', angle: 'PLACE 3 POINTS FOR ANGLE' };
+  document.getElementById('rLabel').textContent = labels[t] || '';
+  document.getElementById('rVal').textContent = '—';
+  // Go to canvas
+  onCanvas = true;
+  focusableElements.forEach(function(el) { el.classList.remove('focused'); });
+  if (document.activeElement) document.activeElement.blur();
+  showCursor();
+  document.getElementById('navHint').textContent = '↑↓ ←→ MOVE CURSOR · ENTER/PINCH PLACE · ↑ TOOLBAR';
+  redraw();
+}
+
+function toggleGrid() {
+  gridOn = !gridOn;
+  document.querySelector('[data-tool="grid"]').classList.toggle('active', gridOn);
+  document.getElementById('modeTag').textContent = gridOn ? 'GRID ON' : '';
+  redraw();
+}
+
+function setUnit(u) {
+  unit = u;
+  document.querySelectorAll('.u-btn').forEach(function(b) { b.classList.toggle('active', b.dataset.unit === u); });
+  updateMList();
+  if (measurements.length) showMeas(measurements[measurements.length - 1]);
+}
+
+// ========== CALIBRATION ==========
+function openCal() {
+  calOpen = true;
+  calSelMM = null;
+  document.getElementById('calScreen').classList.add('show');
+  document.querySelectorAll('.cal-opt').forEach(function(o) { o.classList.remove('selected'); });
+  onCanvas = false;
+  updateFocusables();
+  moveFocusMeta(0);
+}
+
+function closeCal() {
+  calOpen = false;
+  document.getElementById('calScreen').classList.remove('show');
+  onCanvas = true;
+  updateFocusables();
+  showCursor();
+}
+
+function selectCal(el, mm) {
+  document.querySelectorAll('.cal-opt').forEach(function(o) { o.classList.remove('selected'); });
+  el.classList.add('selected');
+  calSelMM = mm;
+}
+
+function applyCal() {
+  if (!calSelMM) return;
+  calRefMM = calSelMM;
+  closeCal();
+  calibrating = true;
+  points = [];
+  document.getElementById('rVal').textContent = '⊕';
+  document.getElementById('rLabel').textContent = 'PLACE 2 POINTS ACROSS REFERENCE OBJECT';
+  redraw();
+}
+
+// ========== POINT PLACEMENT ==========
+function placePoint(x, y) {
+  if (calibrating) {
+    points.push({ x: x, y: y });
+    if (points.length === 2) {
+      var d = dist(points[0], points[1]);
+      pxPerMM = d / calRefMM;
+      calibrating = false;
+      points = [];
+      document.getElementById('rVal').innerHTML = '✓';
+      document.getElementById('rLabel').textContent = 'CALIBRATED · ' + pxPerMM.toFixed(2) + ' PX/MM';
+      document.querySelector('[data-tool="cal"]').classList.add('cal-done');
+    }
+    redraw();
+    return;
+  }
+
+  points.push({ x: x, y: y });
+  if (tool === 'ruler' && points.length === 2) finishMeas();
+  else if (tool === 'angle' && points.length === 3) finishMeas();
+  redraw();
+}
+
+function finishMeas() {
+  var c = COLORS[colorIdx % COLORS.length]; colorIdx++;
+  var m = { tool: tool, points: points.slice(), color: c };
+  if (tool === 'ruler') m.pxDist = dist(points[0], points[1]);
+  else if (tool === 'path') {
+    var t = 0; for (var i = 1; i < points.length; i++) t += dist(points[i-1], points[i]);
+    m.pxDist = t;
+  } else if (tool === 'angle') {
+    m.angle = calcAngle(points[0], points[1], points[2]);
+  }
+  measurements.push(m);
+  showMeas(m);
+  updateMList();
+  points = [];
+  redraw();
+}
+
+// ========== MATH ==========
+function dist(a, b) { return Math.sqrt((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y)); }
+function calcAngle(a, b, c) {
+  var ab = { x: a.x - b.x, y: a.y - b.y }, cb = { x: c.x - b.x, y: c.y - b.y };
+  var dot = ab.x * cb.x + ab.y * cb.y;
+  var mag = Math.sqrt(ab.x*ab.x + ab.y*ab.y) * Math.sqrt(cb.x*cb.x + cb.y*cb.y);
+  return Math.acos(Math.max(-1, Math.min(1, dot / mag))) * (180 / Math.PI);
+}
+
+function convert(px) {
+  if (!pxPerMM) return { v: px.toFixed(1), u: 'px' };
+  var mm = px / pxPerMM;
+  if (unit === 'mm') return { v: mm.toFixed(1), u: 'mm' };
+  if (unit === 'cm') return { v: (mm / 10).toFixed(2), u: 'cm' };
+  if (unit === 'in') return { v: (mm / 25.4).toFixed(2), u: 'in' };
+  return { v: px.toFixed(0), u: 'px' };
+}
+
+function showMeas(m) {
+  if (m.angle !== undefined) {
+    document.getElementById('rVal').innerHTML = m.angle.toFixed(1) + '<span class="r-unit">°</span>';
+    document.getElementById('rLabel').textContent = 'ANGLE';
+  } else {
+    var c = convert(m.pxDist);
+    document.getElementById('rVal').innerHTML = c.v + '<span class="r-unit">' + c.u + '</span>';
+    document.getElementById('rLabel').textContent = m.tool === 'path' ? 'PATH LENGTH' : 'DISTANCE';
+  }
+}
+
+function updateMList() {
+  var el = document.getElementById('mList');
+  el.innerHTML = '';
+  measurements.slice(-5).forEach(function(m) {
+    var d = document.createElement('div');
+    d.className = 'm-item';
+    var val = m.angle !== undefined ? m.angle.toFixed(1) + '°' : (function() { var c = convert(m.pxDist); return c.v + ' ' + c.u; })();
+    d.innerHTML = '<div class="m-dot" style="background:' + m.color + '"></div>' + val;
+    el.appendChild(d);
+  });
+}
+
+// ========== ACTIONS ==========
+function undoLast() {
+  if (measurements.length) {
+    measurements.pop(); colorIdx = measurements.length;
+    if (measurements.length) showMeas(measurements[measurements.length - 1]);
+    else { document.getElementById('rVal').textContent = '—'; document.getElementById('rLabel').textContent = 'CLEARED'; }
+    updateMList(); redraw();
+  }
+}
+
+function clearAll() {
+  measurements = []; points = []; colorIdx = 0;
+  document.getElementById('rVal').textContent = '—';
+  document.getElementById('rLabel').textContent = 'ALL CLEARED';
+  updateMList(); redraw();
+}
+
+// ========== RENDER ==========
+function redraw() {
+  drawCtx.clearRect(0, 0, W, H);
+  overlayCtx.clearRect(0, 0, W, H);
+
+  // Grid
+  if (gridOn) {
+    var s = pxPerMM ? pxPerMM * 10 : 40;
+    overlayCtx.strokeStyle = 'rgba(0,212,255,0.06)'; overlayCtx.lineWidth = 1;
+    for (var x = 0; x < W; x += s) { overlayCtx.beginPath(); overlayCtx.moveTo(x, 0); overlayCtx.lineTo(x, H); overlayCtx.stroke(); }
+    for (var y = 0; y < H; y += s) { overlayCtx.beginPath(); overlayCtx.moveTo(0, y); overlayCtx.lineTo(W, y); overlayCtx.stroke(); }
+    overlayCtx.strokeStyle = 'rgba(0,212,255,0.12)';
+    var ms = s * 5;
+    for (x = 0; x < W; x += ms) { overlayCtx.beginPath(); overlayCtx.moveTo(x, 0); overlayCtx.lineTo(x, H); overlayCtx.stroke(); }
+    for (y = 0; y < H; y += ms) { overlayCtx.beginPath(); overlayCtx.moveTo(0, y); overlayCtx.lineTo(W, y); overlayCtx.stroke(); }
+  }
+
+  // Saved measurements
+  measurements.forEach(function(m) { drawMeas(drawCtx, m); });
+
+  // In-progress
+  if (points.length > 0) {
+    var col = calibrating ? '#4ade80' : '#00d4ff';
+    drawCtx.setLineDash([5, 3]);
+    points.forEach(function(p) { drawPt(drawCtx, p, col); });
+    if (points.length > 1) {
+      drawCtx.strokeStyle = col; drawCtx.lineWidth = 2;
+      drawCtx.beginPath(); drawCtx.moveTo(points[0].x, points[0].y);
+      for (var i = 1; i < points.length; i++) drawCtx.lineTo(points[i].x, points[i].y);
+      drawCtx.stroke();
+    }
+    // Preview line to cursor
+    if (onCanvas) {
+      var last = points[points.length - 1];
+      drawCtx.strokeStyle = col; drawCtx.lineWidth = 1.5;
+      drawCtx.beginPath(); drawCtx.moveTo(last.x, last.y); drawCtx.lineTo(cursorX, cursorY); drawCtx.stroke();
+      if (tool === 'ruler' && points.length === 1) {
+        var d = dist(last, { x: cursorX, y: cursorY });
+        var cv = convert(d);
+        var mx = (last.x + cursorX) / 2, my = (last.y + cursorY) / 2 - 12;
+        drawCtx.setLineDash([]);
+        drawCtx.font = '11px Consolas, monospace'; drawCtx.textAlign = 'center';
+        var tw = drawCtx.measureText(cv.v + ' ' + cv.u).width;
+        drawCtx.fillStyle = 'rgba(0,0,0,0.6)';
+        drawCtx.fillRect(mx - tw/2 - 5, my - 9, tw + 10, 18);
+        drawCtx.fillStyle = col;
+        drawCtx.fillText(cv.v + ' ' + cv.u, mx, my + 4);
+      }
+    }
+    drawCtx.setLineDash([]);
+  }
+}
+
+function drawMeas(ctx, m) {
+  var pts = m.points;
+  ctx.strokeStyle = m.color; ctx.lineWidth = 2; ctx.setLineDash([]);
+  ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+  for (var i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  ctx.stroke();
+  pts.forEach(function(p) { drawPt(ctx, p, m.color); });
+
+  var label, lx, ly;
+  if (m.angle !== undefined) {
+    label = m.angle.toFixed(1) + '°';
+    lx = pts[1].x + 18; ly = pts[1].y - 8;
+    var a1 = Math.atan2(pts[0].y - pts[1].y, pts[0].x - pts[1].x);
+    var a2 = Math.atan2(pts[2].y - pts[1].y, pts[2].x - pts[1].x);
+    ctx.beginPath(); ctx.arc(pts[1].x, pts[1].y, 22, a1, a2, a1 > a2);
+    ctx.strokeStyle = m.color; ctx.lineWidth = 1.5; ctx.stroke();
+  } else {
+    var c = convert(m.pxDist); label = c.v + ' ' + c.u;
+    lx = pts.length === 2 ? (pts[0].x + pts[1].x) / 2 : pts[Math.floor(pts.length / 2)].x + 8;
+    ly = pts.length === 2 ? (pts[0].y + pts[1].y) / 2 - 12 : pts[Math.floor(pts.length / 2)].y - 12;
+    if (m.tool === 'ruler') {
+      var ang = Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x), perp = ang + Math.PI / 2;
+      [pts[0], pts[1]].forEach(function(p) {
+        ctx.beginPath(); ctx.moveTo(p.x + Math.cos(perp) * 6, p.y + Math.sin(perp) * 6);
+        ctx.lineTo(p.x - Math.cos(perp) * 6, p.y - Math.sin(perp) * 6);
+        ctx.strokeStyle = m.color; ctx.lineWidth = 1.5; ctx.stroke();
+      });
+    }
+  }
+
+  ctx.font = '10px Consolas, monospace'; ctx.textAlign = 'center';
+  var tw = ctx.measureText(label).width;
+  ctx.fillStyle = 'rgba(0,0,0,0.65)';
+  ctx.beginPath(); ctx.roundRect(lx - tw/2 - 6, ly - 9, tw + 12, 18, 4); ctx.fill();
+  ctx.fillStyle = m.color; ctx.fillText(label, lx, ly + 4);
+}
+
+function drawPt(ctx, p, color) {
+  ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
+  ctx.beginPath(); ctx.arc(p.x, p.y, 7, 0, Math.PI * 2); ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.stroke();
+}
+
+// ========== INIT ==========
+updateFocusables();
+showCursor();
+document.getElementById('navHint').textContent = '↑↓ ←→ MOVE CURSOR · ENTER/PINCH PLACE · ↑ TOOLBAR';
+redraw();
+</script>
+
+</body>
+</html>
